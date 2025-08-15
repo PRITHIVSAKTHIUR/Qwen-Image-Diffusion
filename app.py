@@ -10,6 +10,10 @@ import numpy as np
 import time
 import zipfile
 import os
+import requests
+from urllib.parse import urlparse
+import tempfile
+import shutil
 
 # Description for the app
 DESCRIPTION = """## Qwen Image Hpc/."""
@@ -44,6 +48,45 @@ aspect_ratios = {
     "3:4": (1140, 1472)
 }
 
+def load_lora_opt(pipe, lora_input):
+    lora_input = lora_input.strip()
+    if not lora_input:
+        return
+
+    # If it's just an ID like "author/model"
+    if "/" in lora_input and not lora_input.startswith("http"):
+        pipe.load_lora_weights(lora_input, adapter_name="default")
+        return
+
+    if lora_input.startswith("http"):
+        url = lora_input
+
+        # Repo page (no blob/resolve)
+        if "huggingface.co" in url and "/blob/" not in url and "/resolve/" not in url:
+            repo_id = urlparse(url).path.strip("/")
+            pipe.load_lora_weights(repo_id, adapter_name="default")
+            return
+
+        # Blob link → convert to resolve link
+        if "/blob/" in url:
+            url = url.replace("/blob/", "/resolve/")
+
+        # Download direct file
+        tmp_dir = tempfile.mkdtemp()
+        local_path = os.path.join(tmp_dir, os.path.basename(urlparse(url).path))
+
+        try:
+            print(f"Downloading LoRA from {url}...")
+            resp = requests.get(url, stream=True)
+            resp.raise_for_status()
+            with open(local_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"Saved LoRA to {local_path}")
+            pipe.load_lora_weights(local_path, adapter_name="default")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 # Generation function for Qwen/Qwen-Image
 @spaces.GPU(duration=120)
 def generate_qwen(
@@ -57,6 +100,8 @@ def generate_qwen(
     num_inference_steps: int = 50,
     num_images: int = 1,
     zip_images: bool = False,
+    lora_input: str = "",
+    lora_scale: float = 1.0,
     progress=gr.Progress(track_tqdm=True),
 ):
     if randomize_seed:
@@ -64,10 +109,21 @@ def generate_qwen(
     generator = torch.Generator(device).manual_seed(seed)
     
     start_time = time.time()
+
+    current_adapters = pipe_qwen.get_list_adapters()
+    for adapter in current_adapters:
+        pipe_qwen.delete_adapters(adapter)
+    pipe_qwen.disable_lora()
+
+    use_lora = False
+    if lora_input and lora_input.strip() != "":
+        load_lora_opt(pipe_qwen, lora_input)
+        pipe_qwen.set_adapters(["default"], adapter_weights=[lora_scale])
+        use_lora = True
     
     images = pipe_qwen(
         prompt=prompt,
-        negative_prompt=negative_prompt if negative_prompt else None,
+        negative_prompt=negative_prompt if negative_prompt else "",
         height=height,
         width=width,
         guidance_scale=guidance_scale,
@@ -88,6 +144,12 @@ def generate_qwen(
             for i, img_path in enumerate(image_paths):
                 zipf.write(img_path, arcname=f"Img_{i}.png")
         zip_path = zip_name
+
+    # Clean up adapters
+    current_adapters = pipe_qwen.get_list_adapters()
+    for adapter in current_adapters:
+        pipe_qwen.delete_adapters(adapter)
+    pipe_qwen.disable_lora()
     
     return image_paths, seed, f"{duration:.2f}", zip_path
 
@@ -105,6 +167,8 @@ def generate(
     num_inference_steps: int,
     num_images: int,
     zip_images: bool,
+    lora_input: str,
+    lora_scale: float,
     progress=gr.Progress(track_tqdm=True),
 ):
     final_negative_prompt = negative_prompt if use_negative_prompt else ""
@@ -119,6 +183,8 @@ def generate(
         num_inference_steps=num_inference_steps,
         num_images=num_images,
         zip_images=zip_images,
+        lora_input=lora_input,
+        lora_scale=lora_scale,
         progress=progress,
     )
 
@@ -146,7 +212,7 @@ footer {
 '''
 
 # Gradio interface
-with gr.Blocks(css=css, theme="bethecloud/storj_theme") as demo:
+with gr.Blocks(css=css, theme="bethecloud/storj_theme", delete_cache=(240, 240)) as demo:
     gr.Markdown(DESCRIPTION)
     with gr.Row():
         prompt = gr.Text(
@@ -165,6 +231,7 @@ with gr.Blocks(css=css, theme="bethecloud/storj_theme") as demo:
             choices=list(aspect_ratios.keys()),
             value="1:1",
         )
+        lora = gr.Textbox(label="qwen image lora (optional)", placeholder="enter the path...")
     with gr.Accordion("Additional Options", open=False):
         use_negative_prompt = gr.Checkbox(
             label="Use negative prompt",
@@ -223,6 +290,14 @@ with gr.Blocks(css=css, theme="bethecloud/storj_theme") as demo:
             value=1,
         )
         zip_images = gr.Checkbox(label="Zip generated images", value=False)
+        with gr.Row(): 
+            lora_scale = gr.Slider(
+                label="LoRA Scale",
+                minimum=0,
+                maximum=2,
+                step=0.01,
+                value=1,
+            )
         
         gr.Markdown("### Output Information")
         seed_display = gr.Textbox(label="Seed used", interactive=False)
@@ -263,6 +338,8 @@ with gr.Blocks(css=css, theme="bethecloud/storj_theme") as demo:
             num_inference_steps,
             num_images,
             zip_images,
+            lora,
+            lora_scale,
         ],
         outputs=[result, seed_display, generation_time, zip_file],
         api_name="run",
@@ -278,4 +355,4 @@ with gr.Blocks(css=css, theme="bethecloud/storj_theme") as demo:
     )
 
 if __name__ == "__main__":
-    demo.queue(max_size=50).launch(share=False, mcp_server=True, ssr_mode=False, show_error=True)
+    demo.queue(max_size=50).launch(share=False, mcp_server=True, ssr_mode=False, debug=True, show_error=True)
