@@ -4,7 +4,7 @@
 
 
 > [!Note]
-Try Demo Here : [https://huggingface.co/spaces/prithivMLmods/Qwen-Image](https://huggingface.co/spaces/prithivMLmods/Qwen-Image-Diffusion)
+Try Demo Here : [https://huggingface.co/spaces/prithivMLmods/Qwen-Image-Diffusion](https://huggingface.co/spaces/prithivMLmods/Qwen-Image-Diffusion)
 
 | ![Image 1](https://cdn-uploads.huggingface.co/production/uploads/65bb837dbfb878f46c77de4c/rMMNVotSQlJLtPTZkZZKL.png) | ![Image 2](https://cdn-uploads.huggingface.co/production/uploads/65bb837dbfb878f46c77de4c/Hwr9Wl4lGtuA-45rs7zRB.png) |
 |---|---|
