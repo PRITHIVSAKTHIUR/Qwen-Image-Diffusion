@@ -15,10 +15,8 @@ from urllib.parse import urlparse
 import tempfile
 import shutil
 
-# Description for the app
-DESCRIPTION = """## Qwen Image Hpc/."""
+from typing import Iterable
 
-# Helper functions
 def save_image(img):
     unique_name = str(uuid.uuid4()) + ".png"
     img.save(unique_name)
@@ -88,7 +86,7 @@ def load_lora_opt(pipe, lora_input):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 # Generation function for Qwen/Qwen-Image
-@spaces.GPU(duration=120)
+@spaces.GPU
 def generate_qwen(
     prompt: str,
     negative_prompt: str = "",
@@ -154,7 +152,7 @@ def generate_qwen(
     return image_paths, seed, f"{duration:.2f}", zip_path
 
 # Wrapper function to handle UI logic
-@spaces.GPU(duration=120)
+@spaces.GPU
 def generate(
     prompt: str,
     negative_prompt: str,
@@ -203,27 +201,21 @@ css = '''
     max-width: 590px !important;
     margin: 0 auto !important;
 }
-h1 {
-    text-align: center;
-}
-footer {
-    visibility: hidden;
-}
+#main-title h1 { font-size: 2.3em !important; }
+
 '''
 
-# Gradio interface
-with gr.Blocks(css=css, theme="bethecloud/storj_theme", delete_cache=(240, 240)) as demo:
-    gr.Markdown(DESCRIPTION)
+with gr.Blocks() as demo:
+    gr.Markdown("# **Qwen-Image-Diffusion**", elem_id="main-title")
+    result = gr.Gallery(label="Result", columns=1, show_label=False, preview=True)
     with gr.Row():
         prompt = gr.Text(
             label="Prompt",
-            show_label=False,
-            max_lines=1,
-            placeholder="✦︎ Enter your prompt",
-            container=False,
+            show_label=True,
+            max_lines=2,
+            placeholder="Enter your prompt..",
         )
-        run_button = gr.Button("Run", scale=0, variant="primary")
-    result = gr.Gallery(label="Result", columns=1, show_label=False, preview=True)
+    run_button = gr.Button("Run", scale=0, variant="primary")
     
     with gr.Row():
         aspect_ratio = gr.Dropdown(
@@ -355,4 +347,8 @@ with gr.Blocks(css=css, theme="bethecloud/storj_theme", delete_cache=(240, 240))
     )
 
 if __name__ == "__main__":
-    demo.queue(max_size=50).launch(share=False, mcp_server=True, ssr_mode=False, debug=True, show_error=True)
+    demo.queue(max_size=50).launch(css=css, theme=gr.themes.Soft(
+            primary_hue="blue",
+            secondary_hue="indigo",
+            neutral_hue="slate",
+        ), mcp_server=True, ssr_mode=False, show_error=True)
